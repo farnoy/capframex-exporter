@@ -1,9 +1,12 @@
 use clap::Parser;
 use futures_util::{join, TryFutureExt};
-use std::fmt::Write;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use warp::Filter;
+
+mod metrics;
+mod processes;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -58,52 +61,14 @@ async fn metrics_handler(
     metric_names: Arc<Vec<String>>,
 ) -> String {
     let x = async move {
-        let processes = async {
-            capframex_client
-                .get(capframex_url.join("/api/processes").unwrap())
-                .send()
-                .await?
-                .json()
-                .await
-        };
-        let metrics = async {
-            Ok(capframex_client
-                .get(
-                    capframex_url
-                        .join(&format!(
-                            "/api/metrics?metricNames={}",
-                            metric_names.join(",")
-                        ))
-                        .unwrap(),
-                )
-                .send()
-                .await?
-                .json::<Vec<f32>>()
-                .await
-                .unwrap_or_default())
-        };
+        let processes = processes::get(&capframex_client, &capframex_url);
+        let metrics = metrics::get(&capframex_client, &capframex_url, &metric_names);
         let (processes, metrics): (reqwest::Result<Vec<String>>, reqwest::Result<Vec<f32>>) =
             join!(processes, metrics);
         let (processes, metrics) = (processes?, metrics?);
         let mut output = String::new();
-        writeln!(
-            output,
-            "# HELP capframex_active_process Process currently being monitored by CapFrameX."
-        )
-        .unwrap();
-        writeln!(output, "# TYPE capframex_active_process gauge").unwrap();
-        for process in processes.iter() {
-            writeln!(output, "capframex_active_process{{name=\"{}\"}} 1", process).unwrap();
-        }
-        writeln!(
-            output,
-            "# HELP capframex_fps Performance metric tracked by CapFrameX."
-        )
-        .unwrap();
-        writeln!(output, "# TYPE capframex_fps gauge").unwrap();
-        for (metric, value) in metric_names.iter().zip(metrics.iter()) {
-            writeln!(output, "capframex_fps {{name=\"{}\"}} {}", metric, value).unwrap();
-        }
+        processes::output(&mut output, &processes);
+        metrics::output(&mut output, &metric_names, &metrics);
         Ok(output)
         // Ok(format!("Hello {processes:?} {metrics:?}"))
     };
