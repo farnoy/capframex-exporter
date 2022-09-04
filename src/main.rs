@@ -1,5 +1,5 @@
 use clap::Parser;
-use futures_util::{join, Future, TryFutureExt};
+use futures_util::{join, TryFutureExt};
 use std::fmt::Write;
 use std::net::SocketAddr;
 use warp::Filter;
@@ -41,12 +41,12 @@ async fn main() {
         .then(move |capframex_client: reqwest::Client, capframex_url: reqwest::Url, metric_names: Vec<String>| {
             let x = async move {
                 let processes = async {
-                    Ok(capframex_client
+                    capframex_client
                         .get(capframex_url.join("/api/processes").unwrap())
                         .send()
                         .await?
                         .json()
-                        .await?)
+                        .await
                 };
                 let metrics = async {
                     Ok(capframex_client
@@ -55,7 +55,7 @@ async fn main() {
                         .await?
                         .json::<Vec<f32>>()
                         .await
-                        .unwrap_or(vec![]))
+                        .unwrap_or_default())
                 };
                 let (processes, metrics): (
                     reqwest::Result<Vec<String>>,
