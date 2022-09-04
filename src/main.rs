@@ -12,27 +12,37 @@ struct Args {
 
     #[clap(short, default_value = "127.0.0.1:1337")]
     capframex_url: SocketAddr,
+
+    #[clap(short, default_value = "Average,P1,P0dot2")]
+    metrics: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() {
-    let args = Args::parse();
+    let Args {
+        bind_address,
+        capframex_url,
+        metrics,
+    } = Args::parse();
 
-    let mut capframex_url = reqwest::Url::parse("http://localhost").unwrap();
-    capframex_url.set_ip_host(args.capframex_url.ip()).unwrap();
-    capframex_url
-        .set_port(Some(args.capframex_url.port()))
-        .unwrap();
+    let capframex_url = {
+        let mut url = reqwest::Url::parse("http://localhost").unwrap();
+        url.set_ip_host(capframex_url.ip()).unwrap();
+        url.set_port(Some(capframex_url.port())).unwrap();
+        url
+    };
 
     let capframex_client = reqwest::Client::builder().build().unwrap();
 
     let handler = warp::path("metrics")
         .and(warp::any().map(move || capframex_client.clone()))
-        .then(move |capframex_client: reqwest::Client| {
+        .and(warp::any().map(move || capframex_url.clone()))
+        .and(warp::any().map(move || metrics.clone()))
+        .then(move |capframex_client: reqwest::Client, capframex_url: reqwest::Url, metric_names: Vec<String>| {
             let x = async move {
                 let processes = async {
                     Ok(capframex_client
-                        .get(&format!("http://{}/api/processes", args.capframex_url))
+                        .get(capframex_url.join("/api/processes").unwrap())
                         .send()
                         .await?
                         .json()
@@ -40,20 +50,16 @@ async fn main() {
                 };
                 let metrics = async {
                     Ok(capframex_client
-                        .get(&format!(
-                            "http://{}/api/metrics?metricNames=P95,Average",
-                            args.capframex_url
-                        ))
+                        .get(capframex_url.join(&format!("/api/metrics?metricNames={}", metric_names.join(","))).unwrap())
                         .send()
                         .await?
-                        .json::<(f32, f32)>()
+                        .json::<Vec<f32>>()
                         .await
-                        .map(|a| Some(a))
-                        .unwrap_or(None))
+                        .unwrap_or(vec![]))
                 };
                 let (processes, metrics): (
                     reqwest::Result<Vec<String>>,
-                    reqwest::Result<Option<(f32, f32)>>,
+                    reqwest::Result<Vec<f32>>,
                 ) = join!(processes, metrics);
                 let (processes, metrics) = (processes?, metrics?);
                 let mut output = String::new();
@@ -72,9 +78,8 @@ async fn main() {
                 )
                 .unwrap();
                 writeln!(output, "# TYPE capframex_fps gauge").unwrap();
-                if let Some((p95, avg)) = metrics {
-                    writeln!(output, "capframex_fps {{name=\"p95\"}} {}", p95).unwrap();
-                    writeln!(output, "capframex_fps {{name=\"avg\"}} {}", avg).unwrap();
+                for (metric, value) in metric_names.iter().zip(metrics.iter()) {
+                    writeln!(output, "capframex_fps {{name=\"{}\"}} {}", metric, value).unwrap();
                 }
                 Ok(output)
                 // Ok(format!("Hello {processes:?} {metrics:?}"))
@@ -85,5 +90,5 @@ async fn main() {
             })
         });
 
-    warp::serve(handler).run(args.bind_address).await;
+    warp::serve(handler).run(bind_address).await;
 }
