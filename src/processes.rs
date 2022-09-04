@@ -12,7 +12,7 @@ pub async fn get(
         .await
 }
 
-pub fn output(output: &mut String, processes: &Vec<String>) {
+pub fn output(output: &mut String, processes: &[String]) {
     writeln!(
         output,
         "# HELP capframex_active_process Process currently being monitored by CapFrameX."
