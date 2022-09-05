@@ -22,7 +22,7 @@ struct Args {
     metrics: Vec<String>,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let Args {
         bind_address,
