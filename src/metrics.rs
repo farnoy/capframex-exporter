@@ -1,11 +1,13 @@
+use serde_json::Value;
 use std::fmt::Write;
+use std::str::FromStr;
 
 pub async fn get(
     capframex_client: &reqwest::Client,
     capframex_url: &reqwest::Url,
     metric_names: &[String],
 ) -> reqwest::Result<Vec<f32>> {
-    Ok(capframex_client
+    let results = capframex_client
         .get(
             capframex_url
                 .join(&format!(
@@ -16,9 +18,20 @@ pub async fn get(
         )
         .send()
         .await?
-        .json::<Vec<f32>>()
-        .await
-        .unwrap_or_default())
+        .json::<Vec<Value>>()
+        .await?;
+
+    let parsed = results
+        .into_iter()
+        .map(|value| match value {
+            Value::String(s) => f32::from_str(&s).ok(),
+            Value::Number(num) => num.as_f64().map(|double| double as f32),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default();
+
+    Ok(parsed)
 }
 
 pub fn output(output: &mut String, metric_names: &[String], metrics: &[f32]) {
